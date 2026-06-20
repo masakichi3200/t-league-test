@@ -247,6 +247,19 @@ function calcPt(scoresIn){
 function fmtPt(v){if(v===null||v===undefined)return"—";return v>0?"+"+v:""+v;}
 function ptClass(v){return v===undefined||v===null?"":v>0?"pt-pos":v<0?"pt-neg":"pt-zero";}
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+// YYYY-MM-DD → MM/DD
+function fmtDate(dateStr){
+  if(!dateStr)return"";
+  const parts=dateStr.split("-");
+  if(parts.length!==3)return dateStr;
+  const m=parts[1].replace(/^0/,"");
+  const d=parts[2].replace(/^0/,"");
+  return m+"/"+d;
+}
+// YYYY-MM-DD + 対局数 → MM/DD-対局数
+function fmtDateGame(dateStr,gameIdx){
+  return fmtDate(dateStr)+"-"+gameIdx;
+}
 function computeStats(players,days){
   const ps={};players.forEach(p=>{ps[p.id]={name:p.name,totalPt:0,games:0};});
   const gameLog=[];
@@ -318,7 +331,7 @@ function periodLabel(fDays,allDays){
   if(!fDays.length)return"該当なし";
   if(fDays.length===allDays.length)return"全日程";
   const dates=fDays.map(d=>d.date).sort();
-  return dates[0].slice(5)+"〜"+dates[dates.length-1].slice(5);
+  return fmtDate(dates[0])+"〜"+fmtDate(dates[dates.length-1]);
 }
 // YYYY-MM
 function ymStr(y,m){return y+"-"+(m<10?"0"+m:m);}
@@ -351,7 +364,7 @@ function render(){
   document.getElementById("app").innerHTML=
     '<div class="header"><span class="logo">🀄 T-League</span><div style="display:flex;align-items:center;gap:8px"><span id="sync-label"></span><button onclick="reloadData()" style="background:rgba(255,255,255,0.2);border:none;border-radius:6px;color:#fff;font-size:14px;padding:4px 10px;cursor:pointer">↺ 更新</button></div></div>'
     +'<nav class="nav">'
-    +navBtn("game","対局")+navBtn("total","成績")+navBtn("settings","設定")
+    +navBtn("game","対戦")+navBtn("total","成績")+navBtn("settings","設定")
     +'</nav><main class="main" id="mc"></main>';
   renderSyncStatus();renderTab();
 }
@@ -488,7 +501,7 @@ function renderGameTab(){
 
   // 対局入力
   const nextGameNo=(activeDay.games||[]).length+1;
-  out+='<div class="card"><div class="h2">対局入力（'+esc(activeDay.date)+' '+nextGameNo+'回戦）</div>';
+  out+='<div class="card"><div class="h2">対戦入力（'+fmtDate(activeDay.date)+' '+nextGameNo+'回戦）</div>';
   out+='<div class="dim" style="margin-bottom:8px">入力値×100が実点数（例: 200 → 20000点）</div>';
   out+='<div class="seat-table">';
   out+='<div class="seat-header"><span class="seat-label">席</span><span style="flex:1">プレイヤー</span><span style="width:122px;text-align:right">点数</span><span style="width:50px;text-align:center">自動</span></div>';
@@ -516,11 +529,11 @@ function renderGameTab(){
   // 獲得ptマトリクス
   if((activeDay.games||[]).length){
     const {playerStats,gameLog}=computeStats(STATE.players,[activeDay]);
-    out+='<div class="card"><div class="h2">'+esc(activeDay.date)+' 獲得pt<span class="badge">'+(activeDay.games||[]).length+'回戦</span></div>';
+    out+='<div class="card"><div class="h2">'+fmtDate(activeDay.date)+' 獲得pt<span class="badge">'+(activeDay.games||[]).length+'回戦</span></div>';
     out+=renderGameMatrix(gameLog,STATE.players,playerStats);
     out+='</div>';
     // その日の精算（pt×レート + 参加費 = 総額）
-    out+='<div class="card"><div class="h2">'+esc(activeDay.date)+' 精算</div>';
+    out+='<div class="card"><div class="h2">'+fmtDate(activeDay.date)+' 精算</div>';
     out+=renderSettlementTable(gameLog,STATE.players,activeDay.date);
     out+='</div>';
   }
@@ -547,7 +560,7 @@ function renderTotalTab(){
   const chartData=[];
   gameLog.forEach(entry=>{
     entry.results.forEach(r=>{if(pts[r.playerId]!==undefined)pts[r.playerId]+=r.pt;});
-    chartData.push({label:entry.date.slice(5)+"-"+entry.gameIdx,values:{...pts}});
+    chartData.push({label:fmtDateGame(entry.date,entry.gameIdx),values:{...pts}});
   });
   const chartPlayers=STATE.players.filter(p=>playerStats[p.id]&&playerStats[p.id].games>0);
 
@@ -556,7 +569,7 @@ function renderTotalTab(){
   out+=renderCalendar(ui.calYear,ui.calMonth,dateDayMap,null,"totalCalNav",ui.fromDate,ui.toDate);
   // 選択中の期間表示
   if(ui.fromDate||ui.toDate){
-    out+='<div class="notice" style="margin-top:8px">期間: '+(ui.fromDate||"—")+' 〜 '+(ui.toDate||"—")+'（'+filteredDays.length+'日間）'
+    out+='<div class="notice" style="margin-top:8px">期間: '+(ui.fromDate?fmtDate(ui.fromDate):"—")+' 〜 '+(ui.toDate?fmtDate(ui.toDate):"—")+'（'+filteredDays.length+'日間）'
       +'<button class="btn-sm" style="margin-left:8px;padding:4px 10px;font-size:14px" onclick="clearTotalFilter()">リセット</button></div>';
   }
   out+='</div>';
@@ -768,8 +781,7 @@ function renderDetailStats(gameLog,players){
   out+='</tbody></table></div>';return out;
 }
 
-// 参加費テーブル: 実施回数・各プレイヤー支払額・総額
-// 精算テーブル: pt×レート、参加費、合計受け取り/支払いを表示
+// 精算テーブル: 獲得ptマトリクスと同じ向き（行=項目、列=プレイヤー）
 function renderSettlementTable(gameLog,players,date){
   if(!gameLog.length)return'<div class="empty">データがありません</div>';
   const{result,rate,fee,ranksToPay}=computeDaySettlement(gameLog,date);
@@ -778,26 +790,39 @@ function renderSettlementTable(gameLog,players,date){
   if(!ap.length)return'<div class="empty">データがありません</div>';
 
   let out='<div class="dim" style="margin-bottom:10px">1pt = '+rate.toLocaleString()+'円 / 当日合計pt'+ranksToPay+'位以内 各-'+fee.toLocaleString()+'円</div>';
-  out+='<div style="overflow-x:auto;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff">';
-  out+='<table style="border-collapse:collapse;font-size:16px;width:100%">';
-  out+='<thead><tr>';
-  out+='<th style="background:#f1f5f9;padding:9px 8px;border-bottom:1.5px solid #e2e8f0;font-weight:700;font-size:15px;text-align:left;white-space:nowrap">プレイヤー</th>';
-  out+='<th style="background:#f1f5f9;padding:9px 6px;border-bottom:1.5px solid #e2e8f0;font-weight:700;font-size:13px;text-align:right;white-space:nowrap">pt</th>';
-  out+='<th style="background:#f1f5f9;padding:9px 6px;border-bottom:1.5px solid #e2e8f0;font-weight:700;font-size:13px;text-align:right;white-space:nowrap">pt金額</th>';
-  out+='<th style="background:#f1f5f9;padding:9px 6px;border-bottom:1.5px solid #e2e8f0;font-weight:700;font-size:13px;text-align:right;white-space:nowrap">参加費</th>';
-  out+='<th style="background:#f1f5f9;padding:9px 8px;border-bottom:1.5px solid #e2e8f0;font-weight:700;font-size:15px;text-align:right;white-space:nowrap">総額</th>';
+  out+='<div class="table-wrap"><table><thead><tr>';
+  out+='<th class="sticky0" style="min-width:60px">項目</th>';
+  ap.forEach(p=>{out+='<th style="min-width:56px">'+esc(p.name)+'</th>';});
   out+='</tr></thead><tbody>';
-  ap.forEach((p,i)=>{
+
+  out+='<tr><td class="sticky0" style="font-size:15px">pt</td>';
+  ap.forEach(p=>{
     const r=result[p.id];
-    const bg=i%2===0?'#fff':'#fafafa';
-    out+='<tr style="background:'+bg+'">';
-    out+='<td style="padding:9px 8px;border-bottom:1px solid #f1f5f9;font-weight:500">'+esc(p.name)+'</td>';
-    out+='<td class="num" style="padding:9px 6px;border-bottom:1px solid #f1f5f9;font-size:13px;color:'+(r.pt>0?'#16a34a':r.pt<0?'#dc2626':'#475569')+'">'+fmtPt(r.pt)+'</td>';
-    out+='<td class="num" style="padding:9px 6px;border-bottom:1px solid #f1f5f9;font-size:13px;color:'+(r.ptYen>0?'#16a34a':r.ptYen<0?'#dc2626':'#475569')+'">'+(r.ptYen>0?'+':'')+r.ptYen.toLocaleString()+'円</td>';
-    out+='<td class="num" style="padding:9px 6px;border-bottom:1px solid #f1f5f9;font-size:13px;color:'+(r.fee>0?'#dc2626':'#94a3b8')+'">'+(r.fee>0?'-'+r.fee.toLocaleString():'0')+'円</td>';
-    out+='<td class="num" style="padding:9px 8px;border-bottom:1px solid #f1f5f9;font-weight:800;font-size:16px;color:'+(r.total>0?'#16a34a':r.total<0?'#dc2626':'#475569')+'">'+(r.total>0?'+':'')+r.total.toLocaleString()+'円</td>';
-    out+='</tr>';
+    out+='<td class="num"><span class="'+(r.pt>0?'pt-pos':r.pt<0?'pt-neg':'pt-zero')+'">'+fmtPt(r.pt)+'</span></td>';
   });
+  out+='</tr>';
+
+  out+='<tr><td class="sticky0" style="font-size:15px">pt金額</td>';
+  ap.forEach(p=>{
+    const r=result[p.id];
+    out+='<td class="num" style="color:'+(r.ptYen>0?'#16a34a':r.ptYen<0?'#dc2626':'#475569')+'">'+(r.ptYen>0?'+':'')+r.ptYen.toLocaleString()+'円</td>';
+  });
+  out+='</tr>';
+
+  out+='<tr><td class="sticky0" style="font-size:15px">参加費</td>';
+  ap.forEach(p=>{
+    const r=result[p.id];
+    out+='<td class="num" style="color:'+(r.fee>0?'#dc2626':'#94a3b8')+'">'+(r.fee>0?'-'+r.fee.toLocaleString():'0')+'円</td>';
+  });
+  out+='</tr>';
+
+  out+='<tr class="sum-row"><td class="sticky0" style="font-size:15px;color:#1e40af">総額</td>';
+  ap.forEach(p=>{
+    const r=result[p.id];
+    out+='<td class="num" style="font-weight:800;font-size:16px;color:'+(r.total>0?'#16a34a':r.total<0?'#dc2626':'#475569')+'">'+(r.total>0?'+':'')+r.total.toLocaleString()+'円</td>';
+  });
+  out+='</tr>';
+
   out+='</tbody></table></div>';
   return out;
 }
@@ -868,7 +893,7 @@ function renderPtHistoryTable(gameLog,players){
   out+='</thead><tbody>';
   rows.forEach(({entry,pm})=>{
     out+='<tr>';
-    out+='<td style="position:sticky;left:0;background:#f8fafc;z-index:2;border-right:1px solid #e2e8f0;padding:8px 6px;font-size:15px;border-bottom:1px solid #f1f5f9;white-space:nowrap">'+entry.date.slice(5)+'-'+entry.gameIdx+'</td>';
+    out+='<td style="position:sticky;left:0;background:#f8fafc;z-index:2;border-right:1px solid #e2e8f0;padding:8px 6px;font-size:15px;border-bottom:1px solid #f1f5f9;white-space:nowrap">'+fmtDateGame(entry.date,entry.gameIdx)+'</td>';
     ap.forEach(p=>{
       const v=pm[p.id];
       out+='<td style="padding:8px 6px;text-align:right;font-size:16px;border-bottom:1px solid #f1f5f9;font-variant-numeric:tabular-nums" class="'+ptClass(v)+'">'+(v===undefined?'—':fmtPt(v))+'</td>';
