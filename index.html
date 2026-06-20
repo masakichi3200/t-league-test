@@ -140,7 +140,7 @@ const DATA_REF=ref(db,"league");
 const SEATS=["東","南","西","北"];
 const MAX_PLAYERS=12;
 const COLORS=["#3b82f6","#ef4444","#16a34a","#d97706","#7c3aed","#0891b2","#db2777","#65a30d","#ea580c","#0284c7","#9333ea","#ca8a04"];
-const DEFAULT_SETTINGS={uma:[20,10,-10,-20],kaeshi:30000,motochi:25000,entryFee:1000,feeRanks:3};
+const DEFAULT_SETTINGS={uma:[20,10,-10,-20],kaeshi:30000,motochi:25000,entryFee:1000,feeRanks:3,ptRate:50};
 const DOW=["日","月","火","水","木","金","土"];
 const DEFAULT_RULES=[
   {k:"対局",v:"東南戦"},
@@ -200,6 +200,7 @@ function normalizeState(){
   if(!Array.isArray(STATE.settings.uma))STATE.settings.uma=[...DEFAULT_SETTINGS.uma];
     if(STATE.settings.entryFee===undefined)STATE.settings.entryFee=DEFAULT_SETTINGS.entryFee;
     if(STATE.settings.feeRanks===undefined)STATE.settings.feeRanks=DEFAULT_SETTINGS.feeRanks;
+    if(STATE.settings.ptRate===undefined)STATE.settings.ptRate=DEFAULT_SETTINGS.ptRate;
   if(!Array.isArray(STATE.rules))STATE.rules=DEFAULT_RULES.map(r=>({...r}));
   STATE.gameDays.forEach(d=>{
     if(!Array.isArray(d.participants))d.participants=[];
@@ -260,23 +261,57 @@ function computeStats(players,days){
   });
   return{playerStats:ps,gameLog};
 }
-// 参加費集計: 各局でfeeRanks位以内の人が entryFee を支払う
+// 参加費集計: 対局日1日の「合計pt順位」がfeeRanks位以内の人がentryFeeを支払う
 function computeFees(gameLog){
   const s=cfg();
   const fee=Number(s.entryFee)||0;
   const ranksToPay=Number(s.feeRanks)||0;
-  const payMap={}; // playerId -> 支払額
-  let totalCollected=0;
-  let gameCount=gameLog.length;
+  // 日付ごとに各プレイヤーの当日合計ptを集計
+  const dayTotals={}; // date -> {playerId: totalPt}
   gameLog.forEach(entry=>{
+    if(!dayTotals[entry.date])dayTotals[entry.date]={};
     entry.results.forEach(r=>{
-      if(r.rank<=ranksToPay){
-        payMap[r.playerId]=(payMap[r.playerId]||0)+fee;
-        totalCollected+=fee;
-      }
+      dayTotals[entry.date][r.playerId]=(dayTotals[entry.date][r.playerId]||0)+r.pt;
     });
   });
-  return{payMap,totalCollected,gameCount,fee,ranksToPay};
+  const payMap={}; // playerId -> 支払額
+  let totalCollected=0;
+  Object.values(dayTotals).forEach(ptMap=>{
+    // その日の合計ptで順位付け（高い順）
+    const sorted=Object.entries(ptMap).sort((a,b)=>b[1]-a[1]);
+    sorted.slice(0,ranksToPay).forEach(([pid])=>{
+      payMap[pid]=(payMap[pid]||0)+fee;
+      totalCollected+=fee;
+    });
+  });
+  const dayCount=Object.keys(dayTotals).length;
+  return{payMap,totalCollected,dayCount,fee,ranksToPay};
+}
+
+// その日の精算: 獲得pt×レート + 参加費(当日合計pt順位)を合算した受け取り/支払い額
+function computeDaySettlement(gameLog,date){
+  const s=cfg();
+  const rate=Number(s.ptRate)||0;
+  const fee=Number(s.entryFee)||0;
+  const ranksToPay=Number(s.feeRanks)||0;
+  const dayLog=gameLog.filter(e=>e.date===date);
+  const ptTotals={}; // playerId -> 当日合計pt
+  dayLog.forEach(entry=>{
+    entry.results.forEach(r=>{
+      ptTotals[r.playerId]=(ptTotals[r.playerId]||0)+r.pt;
+    });
+  });
+  // 当日合計pt順位で参加費対象者を決定
+  const sorted=Object.entries(ptTotals).sort((a,b)=>b[1]-a[1]);
+  const feePayers=new Set(sorted.slice(0,ranksToPay).map(([pid])=>pid));
+  const result={}; // playerId -> {pt, ptYen, fee, total}
+  Object.keys(ptTotals).forEach(pid=>{
+    const pt=ptTotals[pid];
+    const ptYen=pt*rate;
+    const feeAmt=feePayers.has(pid)?fee:0;
+    result[pid]={pt,ptYen,fee:feeAmt,total:ptYen-feeAmt};
+  });
+  return{result,rate,fee,ranksToPay};
 }
 
 function periodLabel(fDays,allDays){
@@ -484,6 +519,10 @@ function renderGameTab(){
     out+='<div class="card"><div class="h2">'+esc(activeDay.date)+' 獲得pt<span class="badge">'+(activeDay.games||[]).length+'回戦</span></div>';
     out+=renderGameMatrix(gameLog,STATE.players,playerStats);
     out+='</div>';
+    // その日の精算（pt×レート + 参加費 = 総額）
+    out+='<div class="card"><div class="h2">'+esc(activeDay.date)+' 精算</div>';
+    out+=renderSettlementTable(gameLog,STATE.players,activeDay.date);
+    out+='</div>';
   }
   out+='</div>';return out;
 }
@@ -547,8 +586,9 @@ function renderSettingsTab(){
     out+='<div class="setting-row"><span class="setting-label">'+label+'</span><input class="input-num" type="number" id="cfg-uma-'+i+'" value="'+s.uma[i]+'"></div>';
   });
   out+='<div style="margin:12px 0 4px"><span class="setting-label">参加費</span></div>';
-  out+='<div class="setting-row"><span class="setting-label">支払い対象（〇位以内）</span><input class="input-num" type="number" id="cfg-feeranks" value="'+s.feeRanks+'" min="0" max="4"></div>';
+  out+='<div class="setting-row"><span class="setting-label">支払い対象（当日〇位以内）</span><input class="input-num" type="number" id="cfg-feeranks" value="'+s.feeRanks+'" min="0" max="4"></div>';
   out+='<div class="setting-row"><span class="setting-label">1回の支払額（円）</span><input class="input-num" type="number" id="cfg-entryfee" value="'+s.entryFee+'"></div>';
+  out+='<div class="setting-row"><span class="setting-label">1ptあたりのレート（円）</span><input class="input-num" type="number" id="cfg-ptrate" value="'+s.ptRate+'"></div>';
   out+='<div style="margin-top:14px"><button class="btn-primary" style="width:100%" onclick="saveSettings()">設定を保存</button>';
   out+='<span class="save-msg" id="cfg-msg"></span></div></div>';
   // ルール一覧
@@ -729,14 +769,47 @@ function renderDetailStats(gameLog,players){
 }
 
 // 参加費テーブル: 実施回数・各プレイヤー支払額・総額
+// 精算テーブル: pt×レート、参加費、合計受け取り/支払いを表示
+function renderSettlementTable(gameLog,players,date){
+  if(!gameLog.length)return'<div class="empty">データがありません</div>';
+  const{result,rate,fee,ranksToPay}=computeDaySettlement(gameLog,date);
+  const pids=Object.keys(result);
+  const ap=players.filter(p=>pids.includes(p.id));
+  if(!ap.length)return'<div class="empty">データがありません</div>';
+
+  let out='<div class="dim" style="margin-bottom:10px">1pt = '+rate.toLocaleString()+'円 / 当日合計pt'+ranksToPay+'位以内 各-'+fee.toLocaleString()+'円</div>';
+  out+='<div style="overflow-x:auto;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff">';
+  out+='<table style="border-collapse:collapse;font-size:16px;width:100%">';
+  out+='<thead><tr>';
+  out+='<th style="background:#f1f5f9;padding:9px 8px;border-bottom:1.5px solid #e2e8f0;font-weight:700;font-size:15px;text-align:left;white-space:nowrap">プレイヤー</th>';
+  out+='<th style="background:#f1f5f9;padding:9px 6px;border-bottom:1.5px solid #e2e8f0;font-weight:700;font-size:13px;text-align:right;white-space:nowrap">pt</th>';
+  out+='<th style="background:#f1f5f9;padding:9px 6px;border-bottom:1.5px solid #e2e8f0;font-weight:700;font-size:13px;text-align:right;white-space:nowrap">pt金額</th>';
+  out+='<th style="background:#f1f5f9;padding:9px 6px;border-bottom:1.5px solid #e2e8f0;font-weight:700;font-size:13px;text-align:right;white-space:nowrap">参加費</th>';
+  out+='<th style="background:#f1f5f9;padding:9px 8px;border-bottom:1.5px solid #e2e8f0;font-weight:700;font-size:15px;text-align:right;white-space:nowrap">総額</th>';
+  out+='</tr></thead><tbody>';
+  ap.forEach((p,i)=>{
+    const r=result[p.id];
+    const bg=i%2===0?'#fff':'#fafafa';
+    out+='<tr style="background:'+bg+'">';
+    out+='<td style="padding:9px 8px;border-bottom:1px solid #f1f5f9;font-weight:500">'+esc(p.name)+'</td>';
+    out+='<td class="num" style="padding:9px 6px;border-bottom:1px solid #f1f5f9;font-size:13px;color:'+(r.pt>0?'#16a34a':r.pt<0?'#dc2626':'#475569')+'">'+fmtPt(r.pt)+'</td>';
+    out+='<td class="num" style="padding:9px 6px;border-bottom:1px solid #f1f5f9;font-size:13px;color:'+(r.ptYen>0?'#16a34a':r.ptYen<0?'#dc2626':'#475569')+'">'+(r.ptYen>0?'+':'')+r.ptYen.toLocaleString()+'円</td>';
+    out+='<td class="num" style="padding:9px 6px;border-bottom:1px solid #f1f5f9;font-size:13px;color:'+(r.fee>0?'#dc2626':'#94a3b8')+'">'+(r.fee>0?'-'+r.fee.toLocaleString():'0')+'円</td>';
+    out+='<td class="num" style="padding:9px 8px;border-bottom:1px solid #f1f5f9;font-weight:800;font-size:16px;color:'+(r.total>0?'#16a34a':r.total<0?'#dc2626':'#475569')+'">'+(r.total>0?'+':'')+r.total.toLocaleString()+'円</td>';
+    out+='</tr>';
+  });
+  out+='</tbody></table></div>';
+  return out;
+}
+
 function renderFeeTable(gameLog,players){
   if(!gameLog.length)return'<div class="empty">データがありません</div>';
   const pids=[...new Set(gameLog.flatMap(e=>e.results.map(r=>r.playerId)))];
   const ap=players.filter(p=>pids.includes(p.id));
-  const{payMap,totalCollected,gameCount,fee,ranksToPay}=computeFees(gameLog);
+  const{payMap,totalCollected,dayCount,fee,ranksToPay}=computeFees(gameLog);
 
   let out='<div class="dim" style="margin-bottom:10px">'
-    +ranksToPay+'位以内 各'+fee.toLocaleString()+'円 / 実施'+gameCount+'回戦</div>';
+    +'当日の合計pt'+ranksToPay+'位以内 各'+fee.toLocaleString()+'円 / 実施'+dayCount+'日</div>';
 
   out+='<div style="overflow-x:auto;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff">';
   out+='<table style="border-collapse:collapse;font-size:16px;width:100%">';
@@ -1046,8 +1119,9 @@ window.saveSettings=()=>{
   const uma=[0,1,2,3].map(i=>Number(document.getElementById("cfg-uma-"+i).value));
   const entryFee=Number(document.getElementById("cfg-entryfee").value);
   const feeRanks=Number(document.getElementById("cfg-feeranks").value);
-  if(isNaN(kaeshi)||isNaN(motochi)||uma.some(isNaN)||isNaN(entryFee)||isNaN(feeRanks)){alert("数値を正しく入力してください");return;}
-  STATE.settings={uma,kaeshi,motochi,entryFee,feeRanks};pushState();
+  const ptRate=Number(document.getElementById("cfg-ptrate").value);
+  if(isNaN(kaeshi)||isNaN(motochi)||uma.some(isNaN)||isNaN(entryFee)||isNaN(feeRanks)||isNaN(ptRate)){alert("数値を正しく入力してください");return;}
+  STATE.settings={uma,kaeshi,motochi,entryFee,feeRanks,ptRate};pushState();
   const msg=document.getElementById("cfg-msg");
   if(msg){msg.textContent="✓ 保存しました";setTimeout(()=>{if(msg)msg.textContent=""},2000);}
 };
