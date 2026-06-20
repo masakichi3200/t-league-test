@@ -601,7 +601,7 @@ function renderSettingsTab(){
   out+='<div style="margin:12px 0 4px"><span class="setting-label">参加費</span></div>';
   out+='<div class="setting-row"><span class="setting-label">支払い対象（当日〇位以内）</span><input class="input-num" type="number" id="cfg-feeranks" value="'+s.feeRanks+'" min="0" max="4"></div>';
   out+='<div class="setting-row"><span class="setting-label">1回の支払額（円）</span><input class="input-num" type="number" id="cfg-entryfee" value="'+s.entryFee+'"></div>';
-  out+='<div class="setting-row"><span class="setting-label">1ptあたりのレート（円）</span><input class="input-num" type="number" id="cfg-ptrate" value="'+s.ptRate+'"></div>';
+  out+='<div class="setting-row"><span class="setting-label">1ptあたりのレート（㋟）</span><input class="input-num" type="number" id="cfg-ptrate" value="'+s.ptRate+'"></div>';
   out+='<div style="margin-top:14px"><button class="btn-primary" style="width:100%" onclick="saveSettings()">設定を保存</button>';
   out+='<span class="save-msg" id="cfg-msg"></span></div></div>';
   // ルール一覧
@@ -789,7 +789,7 @@ function renderSettlementTable(gameLog,players,date){
   const ap=players.filter(p=>pids.includes(p.id));
   if(!ap.length)return'<div class="empty">データがありません</div>';
 
-  let out='<div class="dim" style="margin-bottom:10px">1pt = '+rate.toLocaleString()+'円 / 当日合計pt'+ranksToPay+'位以内 各-'+fee.toLocaleString()+'円</div>';
+  let out='<div class="dim" style="margin-bottom:10px">1pt = '+rate.toLocaleString()+'㋟ / 当日合計pt'+ranksToPay+'位以内 各'+fee.toLocaleString()+'円</div>';
   out+='<div class="table-wrap"><table><thead><tr>';
   out+='<th class="sticky0" style="min-width:60px">項目</th>';
   ap.forEach(p=>{out+='<th style="min-width:56px">'+esc(p.name)+'</th>';});
@@ -805,21 +805,14 @@ function renderSettlementTable(gameLog,players,date){
   out+='<tr><td class="sticky0" style="font-size:15px">pt金額</td>';
   ap.forEach(p=>{
     const r=result[p.id];
-    out+='<td class="num" style="color:'+(r.ptYen>0?'#16a34a':r.ptYen<0?'#dc2626':'#475569')+'">'+(r.ptYen>0?'+':'')+r.ptYen.toLocaleString()+'円</td>';
+    out+='<td class="num" style="color:'+(r.ptYen>0?'#16a34a':r.ptYen<0?'#dc2626':'#475569')+'">'+(r.ptYen>0?'+':'')+r.ptYen.toLocaleString()+'㋟</td>';
   });
   out+='</tr>';
 
   out+='<tr><td class="sticky0" style="font-size:15px">参加費</td>';
   ap.forEach(p=>{
     const r=result[p.id];
-    out+='<td class="num" style="color:'+(r.fee>0?'#dc2626':'#94a3b8')+'">'+(r.fee>0?'-'+r.fee.toLocaleString():'0')+'円</td>';
-  });
-  out+='</tr>';
-
-  out+='<tr class="sum-row"><td class="sticky0" style="font-size:15px;color:#1e40af">総額</td>';
-  ap.forEach(p=>{
-    const r=result[p.id];
-    out+='<td class="num" style="font-weight:800;font-size:16px;color:'+(r.total>0?'#16a34a':r.total<0?'#dc2626':'#475569')+'">'+(r.total>0?'+':'')+r.total.toLocaleString()+'円</td>';
+    out+='<td class="num" style="color:'+(r.fee>0?'#dc2626':'#94a3b8')+'">'+r.fee.toLocaleString()+'円</td>';
   });
   out+='</tr>';
 
