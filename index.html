@@ -140,7 +140,7 @@ const DATA_REF=ref(db,"league");
 const SEATS=["東","南","西","北"];
 const MAX_PLAYERS=12;
 const COLORS=["#3b82f6","#ef4444","#16a34a","#d97706","#7c3aed","#0891b2","#db2777","#65a30d","#ea580c","#0284c7","#9333ea","#ca8a04"];
-const DEFAULT_SETTINGS={uma:[20,10,-10,-20],kaeshi:30000,motochi:25000};
+const DEFAULT_SETTINGS={uma:[20,10,-10,-20],kaeshi:30000,motochi:25000,entryFee:1000,feeRanks:3};
 const DOW=["日","月","火","水","木","金","土"];
 const DEFAULT_RULES=[
   {k:"対局",v:"東南戦"},
@@ -198,6 +198,8 @@ function normalizeState(){
   if(!Array.isArray(STATE.gameDays))STATE.gameDays=[];
   if(!STATE.settings)STATE.settings={...DEFAULT_SETTINGS};
   if(!Array.isArray(STATE.settings.uma))STATE.settings.uma=[...DEFAULT_SETTINGS.uma];
+    if(STATE.settings.entryFee===undefined)STATE.settings.entryFee=DEFAULT_SETTINGS.entryFee;
+    if(STATE.settings.feeRanks===undefined)STATE.settings.feeRanks=DEFAULT_SETTINGS.feeRanks;
   if(!Array.isArray(STATE.rules))STATE.rules=DEFAULT_RULES.map(r=>({...r}));
   STATE.gameDays.forEach(d=>{
     if(!Array.isArray(d.participants))d.participants=[];
@@ -258,6 +260,25 @@ function computeStats(players,days){
   });
   return{playerStats:ps,gameLog};
 }
+// 参加費集計: 各局でfeeRanks位以内の人が entryFee を支払う
+function computeFees(gameLog){
+  const s=cfg();
+  const fee=Number(s.entryFee)||0;
+  const ranksToPay=Number(s.feeRanks)||0;
+  const payMap={}; // playerId -> 支払額
+  let totalCollected=0;
+  let gameCount=gameLog.length;
+  gameLog.forEach(entry=>{
+    entry.results.forEach(r=>{
+      if(r.rank<=ranksToPay){
+        payMap[r.playerId]=(payMap[r.playerId]||0)+fee;
+        totalCollected+=fee;
+      }
+    });
+  });
+  return{payMap,totalCollected,gameCount,fee,ranksToPay};
+}
+
 function periodLabel(fDays,allDays){
   if(!fDays.length)return"該当なし";
   if(fDays.length===allDays.length)return"全日程";
@@ -504,6 +525,7 @@ function renderTotalTab(){
   out+='<div class="card"><div class="h2">ポイント推移（'+pLabel+'）</div>'+renderLineChart(chartData,chartPlayers)+'</div>';
   out+='<div class="card"><div class="h2">獲得pt履歴（'+pLabel+'）</div>'+renderPtHistoryTable(gameLog,STATE.players)+'</div>';
   out+='<div class="card"><div class="h2">成績詳細（'+pLabel+'）</div>'+renderDetailStats(gameLog,STATE.players)+'</div>';
+  out+='<div class="card"><div class="h2">参加費（'+pLabel+'）</div>'+renderFeeTable(gameLog,STATE.players)+'</div>';
   out+='</div>';return out;
 }
 
@@ -524,6 +546,9 @@ function renderSettingsTab(){
   ['1着','2着','3着','4着'].forEach((label,i)=>{
     out+='<div class="setting-row"><span class="setting-label">'+label+'</span><input class="input-num" type="number" id="cfg-uma-'+i+'" value="'+s.uma[i]+'"></div>';
   });
+  out+='<div style="margin:12px 0 4px"><span class="setting-label">参加費</span></div>';
+  out+='<div class="setting-row"><span class="setting-label">支払い対象（〇位以内）</span><input class="input-num" type="number" id="cfg-feeranks" value="'+s.feeRanks+'" min="0" max="4"></div>';
+  out+='<div class="setting-row"><span class="setting-label">1回の支払額（円）</span><input class="input-num" type="number" id="cfg-entryfee" value="'+s.entryFee+'"></div>';
   out+='<div style="margin-top:14px"><button class="btn-primary" style="width:100%" onclick="saveSettings()">設定を保存</button>';
   out+='<span class="save-msg" id="cfg-msg"></span></div></div>';
   // ルール一覧
@@ -701,6 +726,38 @@ function renderDetailStats(gameLog,players){
     out+='</tr>';
   });
   out+='</tbody></table></div>';return out;
+}
+
+// 参加費テーブル: 実施回数・各プレイヤー支払額・総額
+function renderFeeTable(gameLog,players){
+  if(!gameLog.length)return'<div class="empty">データがありません</div>';
+  const pids=[...new Set(gameLog.flatMap(e=>e.results.map(r=>r.playerId)))];
+  const ap=players.filter(p=>pids.includes(p.id));
+  const{payMap,totalCollected,gameCount,fee,ranksToPay}=computeFees(gameLog);
+
+  let out='<div class="dim" style="margin-bottom:10px">'
+    +ranksToPay+'位以内 各'+fee.toLocaleString()+'円 / 実施'+gameCount+'回戦</div>';
+
+  out+='<div style="overflow-x:auto;border-radius:10px;border:1.5px solid #e2e8f0;background:#fff">';
+  out+='<table style="border-collapse:collapse;font-size:16px;width:100%">';
+  out+='<thead><tr>';
+  out+='<th style="background:#f1f5f9;padding:9px 8px;border-bottom:1.5px solid #e2e8f0;font-weight:700;font-size:15px;text-align:left;white-space:nowrap">プレイヤー</th>';
+  out+='<th style="background:#f1f5f9;padding:9px 8px;border-bottom:1.5px solid #e2e8f0;font-weight:700;font-size:15px;text-align:right;white-space:nowrap">支払額</th>';
+  out+='</tr></thead><tbody>';
+  ap.forEach((p,i)=>{
+    const amt=payMap[p.id]||0;
+    const bg=i%2===0?'#fff':'#fafafa';
+    out+='<tr style="background:'+bg+'">';
+    out+='<td style="padding:9px 8px;border-bottom:1px solid #f1f5f9;font-weight:500">'+esc(p.name)+'</td>';
+    out+='<td style="padding:9px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-variant-numeric:tabular-nums;color:'+(amt>0?'#dc2626':'#94a3b8')+';font-weight:'+(amt>0?'700':'400')+'">'+amt.toLocaleString()+'円</td>';
+    out+='</tr>';
+  });
+  out+='<tr style="background:#eff6ff;border-top:2px solid #3b82f6">';
+  out+='<td style="padding:10px 8px;font-weight:800;color:#1e40af">総額</td>';
+  out+='<td style="padding:10px 8px;text-align:right;font-weight:800;color:#1e40af;font-size:17px">'+totalCollected.toLocaleString()+'円</td>';
+  out+='</tr>';
+  out+='</tbody></table></div>';
+  return out;
 }
 
 // 獲得pt履歴: 2行ヘッダー固定（名前行・累計pt行）、縦スクロール対応
@@ -987,8 +1044,10 @@ window.saveSettings=()=>{
   const kaeshi=Number(document.getElementById("cfg-kaeshi").value);
   const motochi=Number(document.getElementById("cfg-motochi").value);
   const uma=[0,1,2,3].map(i=>Number(document.getElementById("cfg-uma-"+i).value));
-  if(isNaN(kaeshi)||isNaN(motochi)||uma.some(isNaN)){alert("数値を正しく入力してください");return;}
-  STATE.settings={uma,kaeshi,motochi};pushState();
+  const entryFee=Number(document.getElementById("cfg-entryfee").value);
+  const feeRanks=Number(document.getElementById("cfg-feeranks").value);
+  if(isNaN(kaeshi)||isNaN(motochi)||uma.some(isNaN)||isNaN(entryFee)||isNaN(feeRanks)){alert("数値を正しく入力してください");return;}
+  STATE.settings={uma,kaeshi,motochi,entryFee,feeRanks};pushState();
   const msg=document.getElementById("cfg-msg");
   if(msg){msg.textContent="✓ 保存しました";setTimeout(()=>{if(msg)msg.textContent=""},2000);}
 };
