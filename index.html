@@ -254,9 +254,9 @@ function calcPt(scoresIn){
     const base=(roundedScore-kaeshi)/1000;
     results[i].pt=base+uma[i];
   }
-  // 1位は他3人のptの合計からオカを加えて逆算（合計が必ずゼロになる）
+  // 1位は他3人のptの合計からの逆算のみ（ウマ・オカなし）
   const othersSum=results[1].pt+results[2].pt+results[3].pt;
-  results[0].pt=-othersSum+oka;
+  results[0].pt=-othersSum;
   return results;
 }
 function fmtPt(v){if(v===null||v===undefined)return"—";return v>0?"+"+v:""+v;}
