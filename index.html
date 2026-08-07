@@ -239,10 +239,19 @@ function calcPt(scoresIn){
   const oka=Math.round((kaeshi-motochi)*4/1000);
   const sorted=[...scoresIn].sort((a,b)=>b.score!==a.score?b.score-a.score:a.seat-b.seat);
   const results=sorted.map((p,i)=>({...p,rank:i+1,pt:0}));
+  // 点数を100点単位で5捨6入してからポイント計算
+  // 100の位が0-5→切り捨て、6-9→切り上げ（絶対値で判定）
+  function round56(score){
+    const sign=score>=0?1:-1;
+    const abs=Math.abs(score);
+    const hundreds=Math.floor(abs/100)%10;
+    const rounded=hundreds>=6?(Math.floor(abs/1000)+1)*1000:Math.floor(abs/1000)*1000;
+    return sign*rounded;
+  }
   // 2〜4位は通常計算（5捨6入 + ウマ）
   for(let i=1;i<4;i++){
-    const diff=results[i].score-kaeshi;
-    const base=diff>=0?Math.floor((diff+500)/1000):-Math.floor((-diff+500)/1000);
+    const roundedScore=round56(results[i].score);
+    const base=(roundedScore-kaeshi)/1000;
     results[i].pt=base+uma[i];
   }
   // 1位は他3人のptの合計からオカを加えて逆算（合計が必ずゼロになる）
