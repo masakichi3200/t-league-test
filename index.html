@@ -238,11 +238,17 @@ function calcPt(scoresIn){
   const s=cfg();const uma=s.uma;const kaeshi=Number(s.kaeshi);const motochi=Number(s.motochi);
   const oka=Math.round((kaeshi-motochi)*4/1000);
   const sorted=[...scoresIn].sort((a,b)=>b.score!==a.score?b.score-a.score:a.seat-b.seat);
-  return sorted.map((p,i)=>{
-    const diff=p.score-kaeshi;
+  const results=sorted.map((p,i)=>({...p,rank:i+1,pt:0}));
+  // 2〜4位は通常計算（5捨6入 + ウマ）
+  for(let i=1;i<4;i++){
+    const diff=results[i].score-kaeshi;
     const base=diff>=0?Math.floor((diff+500)/1000):-Math.floor((-diff+500)/1000);
-    return{...p,rank:i+1,pt:base+uma[i]+(i===0?oka:0)};
-  });
+    results[i].pt=base+uma[i];
+  }
+  // 1位は他3人のptの合計からオカを加えて逆算（合計が必ずゼロになる）
+  const othersSum=results[1].pt+results[2].pt+results[3].pt;
+  results[0].pt=-othersSum+oka;
+  return results;
 }
 function fmtPt(v){if(v===null||v===undefined)return"—";return v>0?"+"+v:""+v;}
 function ptClass(v){return v===undefined||v===null?"":v>0?"pt-pos":v<0?"pt-neg":"pt-zero";}
@@ -802,7 +808,7 @@ function renderSettlementTable(gameLog,players,date){
   });
   out+='</tr>';
 
-  out+='<tr><td class="sticky0" style="font-size:15px">pt金額</td>';
+  out+='<tr><td class="sticky0" style="font-size:15px">㋟換算額</td>';
   ap.forEach(p=>{
     const r=result[p.id];
     out+='<td class="num" style="color:'+(r.ptYen>0?'#16a34a':r.ptYen<0?'#dc2626':'#475569')+'">'+(r.ptYen>0?'+':'')+r.ptYen.toLocaleString()+'㋟</td>';
